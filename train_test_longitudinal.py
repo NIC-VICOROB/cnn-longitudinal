@@ -17,7 +17,8 @@ from lasagne.layers import DenseLayer
 def parse_inputs():
     # I decided to separate this function, for easier acces to the command line parameters
     parser = argparse.ArgumentParser(description='Test different nets with 3D data.')
-    parser.add_argument('-f', '--folder', dest='dir_name', default='/home/mariano/DATA/Subtraction/')
+    parser.add_argument('-f', '--train-folder', dest='dir_train', default='./Training')
+    parser.add_argument('-F', '--test-folder', dest='dir_test', default='./Testing')
     parser.add_argument('-i', '--patch-width', dest='patch_width', type=int, default=9)
     parser.add_argument('-p', '--pool-size', dest='pool_size', type=int, default=2)
     parser.add_argument('-k', '--kernel-size', dest='conv_width', nargs='+', type=int, default=3)
@@ -303,12 +304,14 @@ def main():
     wm_name = options['wm_mask']
     sub_folder = options['sub_folder']
     sub_name = options['flair_sub']
-    dir_name = options['dir_name']
-    patients = [f for f in sorted(os.listdir(dir_name))
-                if os.path.isdir(os.path.join(dir_name, f))]
-    n_patients = len(patients)
-    names = get_names_from_path(dir_name, options, patients)
-    defo_names = get_defonames_from_path(dir_name, options, patients) if defo else None
+    dir_train = options['dir_train']
+    dir_test = options['dir_test']
+    patients_train = [f for f in sorted(os.listdir(dir_train))
+                      if os.path.isdir(os.path.join(dir_train, f))]
+    patients_test = [f for f in sorted(os.listdir(dir_train))
+                      if os.path.isdir(os.path.join(dir_train, f))]
+    train_names = get_names_from_path(dir_train, options, patients_train)
+    train_defo_names = get_defonames_from_path(dir_train, options, patients_train) if defo else None
     defo_width = conv_blocks*2+defo if defo else None
     defo_size = (defo_width, defo_width, defo_width)
 
@@ -316,156 +319,147 @@ def main():
     seed = np.random.randint(np.iinfo(np.int32).max)
 
     # Metrics output
-    metrics_file = os.path.join(dir_name, 'metrics' + sufix)
+    metrics_file = os.path.join(dir_train, 'metrics' + sufix)
 
     with open(metrics_file, 'w') as f:
 
         print(c['c'] + '[' + strftime("%H:%M:%S") + '] ' + 'Starting leave-one-out' + c['nc'])
         # Leave-one-out main loop (we'll do 2 training iterations with testing for each patient)
-        for i in range(0, n_patients):
-            # Prepare the data relevant to the leave-one-out (subtract the patient from the dataset and set the path)
-            # Also, prepare the network
-            case = patients[i]
-            path = os.path.join(dir_name, case)
-            names_lou = np.concatenate([names[:, :i], names[:, i + 1:]], axis=1)
-            defo_names_lou = np.concatenate([defo_names[:, :i], defo_names[:, i + 1:]], axis=1) if defo else None
-            print(c['c'] + '[' + strftime("%H:%M:%S") + ']  ' + c['nc'] + 'Patient ' + c['b'] + case + c['nc'] +
-                  c['g'] + ' (%d/%d)' % (i+1, n_patients))
-            print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
-                  '<Running iteration ' + c['b'] + '1' + c['nc'] + c['g'] + '>' + c['nc'])
-            net_name = os.path.join(path, 'deep-longitudinal.init' + sufix + '.')
-            if greenspan:
-                net = create_cnn_greenspan(
-                    input_channels=names.shape[0]/2,
-                    patience=25,
+        # Prepare the training data
+        # Also, prepare the network
+        print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
+              '<Running iteration ' + c['b'] + '1' + c['nc'] + c['g'] + '>' + c['nc'])
+        net_name = os.path.join(dir_train, 'deep-longitudinal.init' + sufix + '.')
+        if greenspan:
+            net = create_cnn_greenspan(
+                input_channels=train_names.shape[0]/2,
+                patience=25,
+                name=net_name,
+                epochs=500
+            )
+            images = ['axial', 'coronal', 'sagital']
+        else:
+            if multi:
+                net = create_cnn3d_det_string(
+                    cnn_path=layers,
+                    input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
+                    convo_size=conv_size,
+                    padding=padding,
+                    dense_size=dense_size,
+                    pool_size=2,
+                    number_filters=n_filters,
+                    patience=10,
+                    multichannel=True,
                     name=net_name,
-                    epochs=500
+                    epochs=100
                 )
-                images = ['axial', 'coronal', 'sagital']
             else:
-                if multi:
-                    net = create_cnn3d_det_string(
-                        cnn_path=layers,
-                        input_shape=(None, names.shape[0], patch_width, patch_width, patch_width),
-                        convo_size=conv_size,
-                        padding=padding,
-                        dense_size=dense_size,
-                        pool_size=2,
-                        number_filters=n_filters,
-                        patience=10,
-                        multichannel=True,
-                        name=net_name,
-                        epochs=100
-                    )
-                else:
-                    net = create_cnn3d_longitudinal(
-                        convo_blocks=conv_blocks,
-                        input_shape=(None, names.shape[0], patch_width, patch_width, patch_width),
-                        images=images,
-                        convo_size=conv_size,
-                        pool_size=pool_size,
-                        dense_size=dense_size,
-                        number_filters=n_filters,
-                        padding=padding,
-                        drop=0.5,
-                        register=register,
-                        defo=defo,
-                        patience=10,
-                        name=net_name,
-                        epochs=100
-                    )
-
-            names_test = get_names_from_path(path, options)
-            defo_names_test = get_defonames_from_path(path, options) if defo else None
-            outputname1 = os.path.join(path, 't' + case + sufix + '.iter1.nii.gz') if not greenspan else os.path.join(
-                path, 't' + case + sufix + '.nii.gz')
-
-            # First we check that we did not train for that patient, in order to save time
-            try:
-                net.load_params_from(net_name + 'model_weights.pkl')
-            except IOError:
-                print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' +
-                      c['g'] + 'Loading the data for ' + c['b'] + 'iteration 1' + c['nc'])
-                # Data loading. Most of it is based on functions from data_creation that load the data.
-                #  But we also need to prepare the name list to load the leave-one-out data.
-                paths = [os.path.join(dir_name, p) for p in np.concatenate([patients[:i], patients[i+1:]])]
-                mask_names = [os.path.join(p_path, mask_name) for p_path in paths]
-                wm_names = [os.path.join(p_path, wm_name) for p_path in paths]
-                pr_names = [os.path.join(p_path, sub_folder, sub_name) for p_path in paths]
-
-                x_train, y_train = load_lesion_cnn_data(
-                    names=names_lou,
-                    mask_names=mask_names,
-                    defo_names=defo_names_lou,
-                    roi_names=wm_names,
-                    pr_names=pr_names,
-                    patch_size=patch_size,
-                    defo_size=defo_size,
-                    random_state=seed
+                net = create_cnn3d_longitudinal(
+                    convo_blocks=conv_blocks,
+                    input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
+                    images=images,
+                    convo_size=conv_size,
+                    pool_size=pool_size,
+                    dense_size=dense_size,
+                    number_filters=n_filters,
+                    padding=padding,
+                    drop=0.5,
+                    register=register,
+                    defo=defo,
+                    patience=10,
+                    name=net_name,
+                    epochs=100
                 )
 
-                # Afterwards we train. Check the relevant training function.
-                if greenspan:
-                    x_train = np.swapaxes(x_train, 1, 2)
-                    train_greenspan(net, x_train, y_train, images)
-                else:
-                    train_net(net, x_train, y_train, images)
-                    with open(net_name + 'layers.pkl', 'wb') as fnet:
-                        pickle.dump(net.layers, fnet, -1)
-            # Then we test the net. Again we save time by checking if we already tested that patient.
-            try:
-                image_nii = load_nii(outputname1)
-                image1 = image_nii.get_data()
-            except IOError:
-                print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
-                      '<Creating the probability map ' + c['b'] + '1' + c['nc'] + c['g'] + '>' + c['nc'])
-                image_nii = load_nii(os.path.join(path, options['image_folder'], options['flair_f']))
-                mask_nii = load_nii(os.path.join(path, wm_name))
-                if greenspan:
-                    image1 = test_greenspan(
-                        net,
-                        names_test,
-                        mask_nii.get_data(),
-                        batch_size,
-                        patch_size,
-                        image_nii.get_data().shape,
-                        images
-                    )
-                else:
-                    image1 = test_net(
-                        net,
-                        names_test,
-                        mask_nii.get_data(),
-                        batch_size,
-                        patch_size,
-                        defo_size,
-                        image_nii.get_data().shape,
-                        images,
-                        defo_names_test
-                    )
-                image_nii.get_data()[:] = image1
-                image_nii.to_filename(outputname1)
+        # First we check that we did not train for that patient, in order to save time
+        try:
+            net.load_params_from(net_name + 'model_weights.pkl')
+        except IOError:
+            print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' +
+                  c['g'] + 'Loading the data for ' + c['b'] + 'iteration 1' + c['nc'])
+            # Data loading. Most of it is based on functions from data_creation that load the data.
+            #  But we also need to prepare the name list to load the leave-one-out data.
+            paths = [os.path.join(dir_train, p) for p in patients_train]
+            mask_names = [os.path.join(p_path, mask_name) for p_path in paths]
+            wm_names = [os.path.join(p_path, wm_name) for p_path in paths]
+            pr_names = [os.path.join(p_path, sub_folder, sub_name) for p_path in paths]
+
+            x_train, y_train = load_lesion_cnn_data(
+                names=train_names,
+                mask_names=mask_names,
+                defo_names=train_defo_names,
+                roi_names=wm_names,
+                pr_names=pr_names,
+                patch_size=patch_size,
+                defo_size=defo_size,
+                random_state=seed
+            )
+
+            # Afterwards we train. Check the relevant training function.
             if greenspan:
-                # Since Greenspan did not use two iterations, we must get the final mask here.
-                outputname_final = os.path.join(path, 't' + case + sufix + '.final.nii.gz')
-                mask_nii.get_data()[:] = (image1 > 0.5).astype(dtype=np.int8)
-                mask_nii.to_filename(outputname_final)
+                x_train = np.swapaxes(x_train, 1, 2)
+                train_greenspan(net, x_train, y_train, images)
             else:
+                train_net(net, x_train, y_train, images)
+                with open(net_name + 'layers.pkl', 'wb') as fnet:
+                    pickle.dump(net.layers, fnet, -1)
+
+            # Then we test the net. We save time by checking if we already tested that patient.
+            for case in patients_test:
+                path = os.path.join(dir_test, case)
+                outputname1 = os.path.join(path, 't' + case + sufix + '.iter1.nii.gz') if not greenspan\
+                    else os.path.join(path, 't' + case + sufix + '.nii.gz')
+                test_defo_names = get_defonames_from_path(path, options) if defo else None
+                test_names = get_names_from_path(path, options)
+                try:
+                    image_nii = load_nii(outputname1)
+                    image1 = image_nii.get_data()
+                except IOError:
+                    print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
+                          '<Creating the probability map ' + c['b'] + '1' + c['nc'] + c['g'] + '>' + c['nc'])
+                    image_nii = load_nii(os.path.join(path, options['image_folder'], options['flair_f']))
+                    mask_nii = load_nii(os.path.join(path, wm_name))
+                    if greenspan:
+                        image1 = test_greenspan(
+                            net,
+                            test_names,
+                            mask_nii.get_data(),
+                            batch_size,
+                            patch_size,
+                            image_nii.get_data().shape,
+                            images
+                        )
+                    else:
+                        image1 = test_net(
+                            net,
+                            test_names,
+                            mask_nii.get_data(),
+                            batch_size,
+                            patch_size,
+                            defo_size,
+                            image_nii.get_data().shape,
+                            images,
+                            test_defo_names
+                        )
+                    image_nii.get_data()[:] = image1
+                    image_nii.to_filename(outputname1)
+
+            if not greenspan:
                 # If not, we test the net with the training set to look for misclassified negative with a high
                 # probability of being positives according to the net.
                 # These voxels will be the input of the second training iteration.
                 ''' Here we get the seeds '''
                 print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' +
                       c['g'] + '<Looking for seeds for the final iteration>' + c['nc'])
-                patients_names = zip(np.rollaxis(names_lou, 1), np.rollaxis(defo_names_lou, 1)) if defo\
-                    else np.rollaxis(names_lou, 1)
+                patients_names = zip(np.rollaxis(train_names, 1), np.rollaxis(train_defo_names, 1)) if defo\
+                    else np.rollaxis(train_names, 1)
                 for patient in patients_names:
                     if defo:
                         patient, d_patient = patient
                     else:
                         d_patient = None
                     patient_path = '/'.join(patient[0].rsplit('/')[:-1])
-                    outputname = os.path.join(patient_path, 't' + case + sufix + '.nii.gz')
+                    outputname = os.path.join(patient_path, 'test' + sufix + '.nii.gz')
                     mask_nii = load_nii(os.path.join('/'.join(patient[0].rsplit('/')[:-3]), wm_name))
                     try:
                         load_nii(outputname)
@@ -500,12 +494,11 @@ def main():
                 f_s = '.f' if freeze else ''
                 ub_s = '.ub' if not balanced else ''
                 final_s = f_s + ub_s
-                outputname2 = os.path.join(path, 't' + case + final_s + sufix + '.iter2.nii.gz')
-                net_name = os.path.join(path, 'deep-longitudinal.final' + final_s + sufix + '.')
+                net_name = os.path.join(dir_train, 'deep-longitudinal.final' + final_s + sufix + '.')
                 if multi:
                     net = create_cnn3d_det_string(
                         cnn_path=layers,
-                        input_shape=(None, names.shape[0], patch_width, patch_width, patch_width),
+                        input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
                         convo_size=conv_size,
                         padding=padding,
                         pool_size=2,
@@ -520,7 +513,7 @@ def main():
                     if not freeze:
                         net = create_cnn3d_longitudinal(
                             convo_blocks=conv_blocks,
-                            input_shape=(None, names.shape[0], patch_width, patch_width, patch_width),
+                            input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
                             images=images,
                             convo_size=conv_size,
                             pool_size=pool_size,
@@ -547,17 +540,17 @@ def main():
                 except IOError:
                     print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' +
                           c['g'] + 'Loading the data for ' + c['b'] + 'iteration 2' + c['nc'])
-                    roi_paths = ['/'.join(name.rsplit('/')[:-1]) for name in names_lou[0, :]]
-                    paths = [os.path.join(dir_name, p) for p in np.concatenate([patients[:i], patients[i + 1:]])]
+                    roi_paths = ['/'.join(name.rsplit('/')[:-1]) for name in train_names[0, :]]
+                    paths = [os.path.join(dir_train, p) for p in patients_train]
                     ipr_names = [os.path.join(p_path, sub_folder, sub_name) for p_path in paths] if freeze else None
-                    pr_names = [os.path.join(p_path, 't' + case + sufix + '.nii.gz') for p_path in roi_paths]
+                    pr_names = [os.path.join(p_path, 'test' + sufix + '.nii.gz') for p_path in roi_paths]
                     mask_names = [os.path.join(p_path, mask_name) for p_path in paths]
                     wm_names = [os.path.join(p_path, wm_name) for p_path in paths]
 
                     x_train, y_train = load_lesion_cnn_data(
-                        names=names_lou,
+                        names=train_names,
                         mask_names=mask_names,
-                        defo_names=defo_names_lou,
+                        defo_names=train_defo_names,
                         roi_names=wm_names,
                         init_pr_names=ipr_names,
                         pr_names=pr_names,
@@ -570,69 +563,85 @@ def main():
                     train_net(net, x_train, y_train, images)
                     with open(net_name + 'layers.pkl', 'wb') as fnet:
                         pickle.dump(net.layers, fnet, -1)
-                try:
-                    image_nii = load_nii(outputname2)
-                    image2 = image_nii.get_data()
-                except IOError:
+
+                for case in patients_test:
+                    path = os.path.join(dir_test, case)
+                    outputname1 = os.path.join(path, 't' + case + sufix + '.iter1.nii.gz')
+                    outputname2 = os.path.join(path, 't' + case + sufix + '.iter2.nii.gz')
+                    test_defo_names = get_defonames_from_path(path, options) if defo else None
+                    test_names = get_names_from_path(path, options)
+                    image_nii = load_nii(outputname1)
+                    image1 = image_nii.get_data()
+                    try:
+                        image_nii = load_nii(outputname2)
+                        image2 = image_nii.get_data()
+                    except IOError:
+                        print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
+                              '<Creating the probability map ' + c['b'] + '2' + c['nc'] + c['g'] + '>' + c['nc'])
+                        image_nii = load_nii(os.path.join(path, options['image_folder'], options['flair_f']))
+                        mask_nii = load_nii(os.path.join(path, wm_name))
+                        image2 = test_net(
+                            net,
+                            test_names,
+                            mask_nii.get_data(),
+                            batch_size,
+                            patch_size,
+                            defo_size,
+                            image_nii.get_data().shape,
+                            images,
+                            test_defo_names
+                        )
+
+                        image_nii.get_data()[:] = image2
+                        image_nii.to_filename(outputname2)
+
+                    image = image1 * image2
+                    image_nii.get_data()[:] = image
+                    outputname_mult = os.path.join(path, 't' + case + final_s + sufix + '.iter1_x_2.nii.gz')
+                    image_nii.to_filename(outputname_mult)
+
+                    image = (image1 * image2) > 0.5
+                    image_nii.get_data()[:] = image
+                    outputname_final = os.path.join(path, 't' + case + final_s + sufix + '.final.nii.gz')
+                    image_nii.to_filename(outputname_final)
+
+                    # Finally we compute some metrics that are stored in the metrics file defined above.
+                    # I plan on replicating Challenge's 2008 evaluation measures here.
+                    gt = load_nii(os.path.join(path, mask_name)).get_data().astype(dtype=np.bool)
+                    seg1 = image1 > 0.5
+                    seg2 = image2 > 0.5
+                    dsc1 = dsc_seg(gt, seg1)
+                    dsc2 = dsc_seg(gt, seg2)
+                    dsc_final = dsc_seg(gt, image)
+                    tpf1 = tp_fraction_seg(gt, seg1)
+                    tpf2 = tp_fraction_seg(gt, seg2)
+                    tpf_final = tp_fraction_seg(gt, image)
+                    fpf1 = fp_fraction_seg(gt, seg1)
+                    fpf2 = fp_fraction_seg(gt, seg2)
+                    fpf_final = fp_fraction_seg(gt, image)
                     print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
-                          '<Creating the probability map ' + c['b'] + '2' + c['nc'] + c['g'] + '>' + c['nc'])
-                    image_nii = load_nii(os.path.join(path, options['image_folder'], options['flair_f']))
-                    mask_nii = load_nii(os.path.join(path, wm_name))
-                    image2 = test_net(
-                        net,
-                        names_test,
-                        mask_nii.get_data(),
-                        batch_size,
-                        patch_size,
-                        defo_size,
-                        image_nii.get_data().shape,
-                        images,
-                        defo_names_test
-                    )
-
-                    image_nii.get_data()[:] = image2
-                    image_nii.to_filename(outputname2)
-
-                image = image1 * image2
-                image_nii.get_data()[:] = image
-                outputname_mult = os.path.join(path, 't' + case + final_s + sufix + '.iter1_x_2.nii.gz')
-                image_nii.to_filename(outputname_mult)
-
-                image = (image1 * image2) > 0.5
-                image_nii.get_data()[:] = image
-                outputname_final = os.path.join(path, 't' + case + final_s + sufix + '.final.nii.gz')
-                image_nii.to_filename(outputname_final)
-
-            # Finally we compute some metrics that are stored in the metrics file defined above.
-            # I plan on replicating Challenge's 2008 evaluation measures here.
-            gt = load_nii(os.path.join(path, mask_name)).get_data().astype(dtype=np.bool)
-            seg1 = image1 > 0.5
-            if not greenspan:
-                seg2 = image2 > 0.5
-            dsc1 = dsc_seg(gt, seg1)
-            if not greenspan:
-                dsc2 = dsc_seg(gt, seg2)
-            if not greenspan:
-                dsc_final = dsc_seg(gt, image)
+                          '<DSC ' + c['c'] + case + c['g'] + ' = ' + c['b'] + str(dsc_final) + c['nc'] + c['g'] + '>' + c['nc'])
+                    f.write('%s;Test 1; %f;%f;%f\n' % (case, dsc1, tpf1, fpf1))
+                    f.write('%s;Test 2; %f;%f;%f\n' % (case, dsc2, tpf2, fpf2))
+                    f.write('%s;Final; %f;%f;%f\n' % (case, dsc_final, tpf_final, fpf_final))
             else:
-                dsc_final = dsc1
-            tpf1 = tp_fraction_seg(gt, seg1)
-            if not greenspan:
-                tpf2 = tp_fraction_seg(gt, seg2)
-            if not greenspan:
-                tpf_final = tp_fraction_seg(gt, image)
-            fpf1 = fp_fraction_seg(gt, seg1)
-            if not greenspan:
-                fpf2 = fp_fraction_seg(gt, seg2)
-            if not greenspan:
-                fpf_final = fp_fraction_seg(gt, image)
-            print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
-                  '<DSC ' + c['c'] + case + c['g'] + ' = ' + c['b'] + str(dsc_final) + c['nc'] + c['g'] + '>' + c['nc'])
-            f.write('%s;Test 1; %f;%f;%f\n' % (case, dsc1, tpf1, fpf1))
-            if not greenspan:
-                f.write('%s;Test 2; %f;%f;%f\n' % (case, dsc2, tpf2, fpf2))
-            if not greenspan:
-                f.write('%s;Final; %f;%f;%f\n' % (case, dsc_final, tpf_final, fpf_final))
+                for case in patients_test:
+                    path = os.path.join(dir_test, case)
+                    outputname = os.path.join(path, 't' + case + sufix + '.nii.gz')
+                    image_nii = load_nii(outputname)
+                    image = image_nii.get_data()
+
+                    # Finally we compute some metrics that are stored in the metrics file defined above.
+                    # I plan on replicating Challenge's 2008 evaluation measures here.
+                    gt = load_nii(os.path.join(path, mask_name)).get_data().astype(dtype=np.bool)
+                    seg = image > 0.5
+                    dsc = dsc_seg(gt, seg)
+                    tpf = tp_fraction_seg(gt, seg)
+                    fpf = fp_fraction_seg(gt, seg)
+                    print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
+                          '<DSC ' + c['c'] + case + c['g'] + ' = ' + c['b'] + str(dsc) + c['nc'] + c['g'] + '>' +
+                          c['nc'])
+                    f.write('%s;Test 1; %f;%f;%f\n' % (case, dsc, tpf, fpf))
 
 
 if __name__ == '__main__':
