@@ -1,7 +1,6 @@
 cycler==0.10.0
 Cython==0.25.2
 decorator==4.0.9
-h5py==2.6.0
 joblib==0.9.4
 Lasagne==0.2.dev1
 Mako==1.0.6
@@ -10,7 +9,6 @@ matplotlib==1.5.1
 networkx==1.11
 nibabel==2.0.2
 -e git+https://github.com/dnouri/nolearn.git@c9b7d1e5a91a1e48608a5678149c8b505bb8f9e4#egg=nolearn
-nolearn-utils==0.1.dev0
 numpy==1.12.1
 pandas==0.18.1
 Pillow==3.1.1

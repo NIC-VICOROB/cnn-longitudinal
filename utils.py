@@ -108,29 +108,6 @@ def plot_layer_tree(final_layer):
     plt.show()
 
 
-def random_affine3d_matrix(x_range=np.pi, y_range=np.pi, z_range=np.pi, t_range=5):
-    x_angle = x_range * np.random.random() - (x_range / 2)
-    y_angle = y_range * np.random.random() - (y_range / 2)
-    z_angle = z_range * np.random.random() - (z_range / 2)
-    t = t_range * np.random.random(3) - (t_range / 2)
-
-    sx = np.sin(x_angle)
-    cx = np.cos(x_angle)
-    sy = np.sin(y_angle)
-    cy = np.cos(y_angle)
-    sz = np.sin(z_angle)
-    cz = np.cos(z_angle)
-
-    affine = np.array([
-        [cy*cz, sx*sy*cz+cx*sz, -cx*sy*cz+sx*sz, t[0]],
-        [-cy*sz, -sx*sy*sx+cx*cz, cx*sy*sz+sx*cz, t[1]],
-        [sy, -sx*cy, cx*cy, t[2]],
-        [0, 0, 0, 1],
-    ])
-
-    return affine
-
-
 def train_test_split(data, labels, test_size=0.1, random_state=42):
     # Init (Set the random seed and determine the number of cases for test)
     n_test = int(floor(data.shape[0]*test_size))
@@ -202,22 +179,3 @@ class EarlyStopping(object):
                 self.best_valid, self.best_valid_epoch))
             nn.get_all_params_values()
             raise StopIteration()
-
-
-class WeightsLogger(object):
-    """Based on EarlyStopping"""
-    def __init__(self, filename):
-        self.params = list()
-        self.filename = filename
-
-    def __call__(self, nn, train_history):
-        params = dict(
-            train=train_history[-1]['train_loss'],
-            valids=train_history[-1]['valid_loss'],
-            weights=nn.get_all_params()
-        )
-        self.params.append(params)
-
-    def save(self):
-        with open(self.filename, 'wb') as f:
-            pickle.dump(self.params, f, -1)

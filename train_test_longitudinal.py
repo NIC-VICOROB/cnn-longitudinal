@@ -5,7 +5,7 @@ import os
 import sys
 from time import strftime
 import numpy as np
-from nets import create_cnn3d_longitudinal, create_cnn3d_det_string, create_cnn_greenspan
+from nets import create_cnn3d_longitudinal, create_cnn_greenspan
 from data_creation import load_patch_batch_percent
 from data_creation import load_lesion_cnn_data
 from nibabel import load as load_nii
@@ -54,7 +54,6 @@ def parse_inputs():
     parser.add_argument('--wm-mask', action='store', dest='wm_mask', default='union_wm_mask.nii.gz')
     parser.add_argument('--brain-mask', action='store', dest='brain_mask', default='brainmask.nii.gz')
     parser.add_argument('--padding', action='store', dest='padding', default='valid')
-    parser.add_argument('--register', action='store_true', dest='register', default=False)
     parser.add_argument('--greenspan', action='store_true', dest='greenspan', default=False)
     parser.add_argument('-m', '--multi-channel', action='store_true', dest='multi', default=False)
     return vars(parser.parse_args())
@@ -260,7 +259,6 @@ def main():
     c = color_codes()
 
     # Prepare the net architecture parameters
-    register = options['register']
     multi = options['multi']
     defo = options['deformation']
     layers = ''.join(options['layers'])
@@ -290,14 +288,13 @@ def main():
     pd_name = 'pd' if use_pd else None
     t2_name = 't2' if use_t2 else None
     images = filter(None, [flair_name, pd_name, t2_name])
-    reg_s = '.reg' if register else ''
     filters_s = 'n'.join(['%d' % nf for nf in n_filters])
     conv_s = 'c'.join(['%d' % cs for cs in conv_size])
     im_s = '.'.join(images)
     mc_s = '.mc' if multi else ''
     d_s = 'd%d.' % (conv_blocks*2+defo) if defo else ''
-    sufix = '.greenspan' if greenspan else '%s.%s%s%s.p%d.c%s.n%s.d%d.e%d.pad_%s' %\
-        (mc_s, d_s, im_s, reg_s, patch_width, conv_s, filters_s, dense_size, epochs, padding)
+    sufix = '.greenspan' if greenspan else '%s.%s%s.p%d.c%s.n%s.d%d.e%d.pad_%s' %\
+        (mc_s, d_s, im_s, patch_width, conv_s, filters_s, dense_size, epochs, padding)
 
     # Prepare the data names
     mask_name = options['mask']
@@ -309,7 +306,7 @@ def main():
     patients_train = [f for f in sorted(os.listdir(dir_train))
                       if os.path.isdir(os.path.join(dir_train, f))]
     patients_test = [f for f in sorted(os.listdir(dir_train))
-                      if os.path.isdir(os.path.join(dir_train, f))]
+                     if os.path.isdir(os.path.join(dir_train, f))]
     train_names = get_names_from_path(dir_train, options, patients_train)
     train_defo_names = get_defonames_from_path(dir_train, options, patients_train) if defo else None
     defo_width = conv_blocks*2+defo if defo else None
@@ -339,37 +336,21 @@ def main():
             )
             images = ['axial', 'coronal', 'sagital']
         else:
-            if multi:
-                net = create_cnn3d_det_string(
-                    cnn_path=layers,
-                    input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
-                    convo_size=conv_size,
-                    padding=padding,
-                    dense_size=dense_size,
-                    pool_size=2,
-                    number_filters=n_filters,
-                    patience=10,
-                    multichannel=True,
-                    name=net_name,
-                    epochs=100
-                )
-            else:
-                net = create_cnn3d_longitudinal(
-                    convo_blocks=conv_blocks,
-                    input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
-                    images=images,
-                    convo_size=conv_size,
-                    pool_size=pool_size,
-                    dense_size=dense_size,
-                    number_filters=n_filters,
-                    padding=padding,
-                    drop=0.5,
-                    register=register,
-                    defo=defo,
-                    patience=10,
-                    name=net_name,
-                    epochs=100
-                )
+            net = create_cnn3d_longitudinal(
+                convo_blocks=conv_blocks,
+                input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
+                images=images,
+                convo_size=conv_size,
+                pool_size=pool_size,
+                dense_size=dense_size,
+                number_filters=n_filters,
+                padding=padding,
+                drop=0.5,
+                defo=defo,
+                patience=10,
+                name=net_name,
+                epochs=100
+            )
 
         # First we check that we did not train for that patient, in order to save time
         try:
@@ -412,8 +393,7 @@ def main():
                 test_defo_names = get_defonames_from_path(path, options) if defo else None
                 test_names = get_names_from_path(path, options)
                 try:
-                    image_nii = load_nii(outputname1)
-                    image1 = image_nii.get_data()
+                    load_nii(outputname1)
                 except IOError:
                     print(c['c'] + '[' + strftime("%H:%M:%S") + ']    ' + c['g'] +
                           '<Creating the probability map ' + c['b'] + '1' + c['nc'] + c['g'] + '>' + c['nc'])
@@ -495,45 +475,29 @@ def main():
                 ub_s = '.ub' if not balanced else ''
                 final_s = f_s + ub_s
                 net_name = os.path.join(dir_train, 'deep-longitudinal.final' + final_s + sufix + '.')
-                if multi:
-                    net = create_cnn3d_det_string(
-                        cnn_path=layers,
+                if not freeze:
+                    net = create_cnn3d_longitudinal(
+                        convo_blocks=conv_blocks,
                         input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
+                        images=images,
                         convo_size=conv_size,
-                        padding=padding,
-                        pool_size=2,
+                        pool_size=pool_size,
                         dense_size=dense_size,
                         number_filters=n_filters,
+                        padding=padding,
+                        drop=0.5,
+                        defo=defo,
                         patience=50,
-                        multichannel=True,
                         name=net_name,
                         epochs=epochs
                     )
                 else:
-                    if not freeze:
-                        net = create_cnn3d_longitudinal(
-                            convo_blocks=conv_blocks,
-                            input_shape=(None, train_names.shape[0], patch_width, patch_width, patch_width),
-                            images=images,
-                            convo_size=conv_size,
-                            pool_size=pool_size,
-                            dense_size=dense_size,
-                            number_filters=n_filters,
-                            padding=padding,
-                            drop=0.5,
-                            register=register,
-                            defo=defo,
-                            patience=50,
-                            name=net_name,
-                            epochs=epochs
-                        )
-                    else:
-                        net.max_epochs = epochs
-                        net.on_epoch_finished[0].name = net_name + 'model_weights.pkl'
-                        for layer in net.get_all_layers():
-                            if not isinstance(layer, DenseLayer):
-                                for param in layer.params:
-                                    layer.params[param].discard('trainable')
+                    net.max_epochs = epochs
+                    net.on_epoch_finished[0].name = net_name + 'model_weights.pkl'
+                    for layer in net.get_all_layers():
+                        if not isinstance(layer, DenseLayer):
+                            for param in layer.params:
+                                layer.params[param].discard('trainable')
 
                 try:
                     net.load_params_from(net_name + 'model_weights.pkl')
