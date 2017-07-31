@@ -3,7 +3,7 @@
 
 ```
 Cabezas, M., Salem, M., Valverde, S., Pareto, D., Oliver, A., Rovira, À., Lladó, X. (2017). 
-Evaluating the effect of class balance on convolutional neural networks to detect positive changes in multiple sclerosis lesions. 
+Evaluating the effect of class balance on convolutional neural networks to detect longitudinal changes in multiple sclerosis lesions. 
 ``` 
 
 # Overview: 
