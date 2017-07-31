@@ -31,5 +31,5 @@ To run the train and testing, two folder must be defined and passed as parameter
 
 # Citing this work:
 
-No citation yet.
+Under review.
 
