@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 
 # How to use it: 
-In order to run these tool, all the images should be on the same space. If available, deformation fields can also be used to improve the segmentation as stated in the article. You can use our [tool](https://github.com/NIC-VICOROB/braintools) to perform all of that preprocessing.
+In order to run this tool, all the images should be on the same space. If available, deformation fields can also be used to improve the segmentation as stated in the article. You can use our [tool](https://github.com/NIC-VICOROB/braintools) to perform all of that preprocessing.
 
 To run the train and testing, two folder must be defined and passed as parameters when running. Each folder must have each patient separated in their own subfolder. If needed, subfolder inside each patient's folder can be defined to point to the images folder, a subtraction folder (used to initialise the method but not really necessary) and the deformation folder. For the leave-one-out experiments, there is a custom [script](https://github.com/marianocabezas/cnn-nolearn/blob/master/train_test_longitudinal.py) used in our experiments. This script is part of the author's CNN sandbox repository using lasagne and nolearn.
 
